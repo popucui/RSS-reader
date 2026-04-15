@@ -254,8 +254,47 @@ button.active,
 
 .source-list {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   margin-top: 12px;
+}
+
+.source-group {
+  display: grid;
+  gap: 8px;
+}
+
+.source-group-heading {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-strong);
+  padding: 0.28rem 0.1rem;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.source-group-heading:hover:not(:disabled) {
+  transform: none;
+  background: rgba(15, 139, 111, 0.08);
+}
+
+.source-group-heading span:last-child {
+  min-width: 24px;
+  border-radius: 999px;
+  background: rgba(15, 139, 111, 0.12);
+  color: var(--accent-strong);
+  padding: 0.1rem 0.45rem;
+  text-align: center;
+}
+
+.source-group-items {
+  display: grid;
+  gap: 8px;
 }
 
 .source-row {

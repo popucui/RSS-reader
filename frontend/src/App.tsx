@@ -16,6 +16,11 @@ import './styles.css';
 
 const topics: Topic[] = ['ai', 'games', 'single-cell', 'biopharma', 'medicine', 'other'];
 const sourceTypes: SourceType[] = ['rss', 'rsshub', 'x_user', 'x_search'];
+const sourceGroups: Array<{ id: string; label: string; types: SourceType[] }> = [
+  { id: 'rss-websites', label: 'RSS / Websites', types: ['rss', 'rsshub'] },
+  { id: 'x-users', label: 'X Users', types: ['x_user'] },
+  { id: 'x-searches', label: 'X Searches', types: ['x_search'] }
+];
 
 const emptySource: SourceInput = {
   name: '',
@@ -37,6 +42,14 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [view, setView] = useState<'inbox' | 'fetch-log'>('inbox');
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
+    try {
+      const value = window.localStorage.getItem('rss-reader.sourceGroups');
+      return value ? (JSON.parse(value) as Record<string, boolean>) : {};
+    } catch {
+      return {};
+    }
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -60,8 +73,22 @@ export default function App() {
     load().catch((nextError: unknown) => setError(nextError instanceof Error ? nextError.message : String(nextError)));
   }, [topic, sourceId, unreadOnly]);
 
+  useEffect(() => {
+    window.localStorage.setItem('rss-reader.sourceGroups', JSON.stringify(collapsedGroups));
+  }, [collapsedGroups]);
+
   const unreadCount = useMemo(() => items.filter((item) => !item.readAt).length, [items]);
   const starredCount = useMemo(() => items.filter((item) => item.starred).length, [items]);
+  const groupedSources = useMemo(
+    () =>
+      sourceGroups
+        .map((group) => ({
+          ...group,
+          sources: sources.filter((source) => group.types.includes(source.type))
+        }))
+        .filter((group) => group.sources.length > 0),
+    [sources]
+  );
 
   async function withBusy(action: () => Promise<unknown>) {
     setBusy(true);
@@ -104,6 +131,13 @@ export default function App() {
         setError(nextError instanceof Error ? nextError.message : String(nextError));
       }
     }
+  }
+
+  function toggleSourceGroup(groupId: string) {
+    setCollapsedGroups((current) => ({
+      ...current,
+      [groupId]: !current[groupId]
+    }));
   }
 
   return (
@@ -216,27 +250,47 @@ export default function App() {
           </form>
 
           <div className="source-list">
-            {sources.map((source) => (
-              <article key={source.id} className="source-row">
-                <div className="favicon" aria-hidden="true">
-                  {source.name.slice(0, 1).toUpperCase()}
-                </div>
-                <div>
-                  <strong>{source.name}</strong>
-                  <span>
-                    {source.type} · {source.lastStatus ?? 'new'}
-                  </span>
-                </div>
-                <div className="row-actions">
-                  <button disabled={busy} onClick={() => withBusy(() => refreshSource(source.id))}>
-                    Fetch
+            {groupedSources.map((group) => {
+              const collapsed = collapsedGroups[group.id] ?? false;
+              return (
+                <section key={group.id} className="source-group">
+                  <button
+                    type="button"
+                    className="source-group-heading"
+                    aria-expanded={!collapsed}
+                    onClick={() => toggleSourceGroup(group.id)}
+                  >
+                    <span>{collapsed ? '▸' : '▾'} {group.label}</span>
+                    <span>{group.sources.length}</span>
                   </button>
-                  <button disabled={busy} onClick={() => withBusy(() => deleteSource(source.id))}>
-                    Delete
-                  </button>
-                </div>
-              </article>
-            ))}
+                  {!collapsed ? (
+                    <div className="source-group-items">
+                      {group.sources.map((source) => (
+                        <article key={source.id} className="source-row">
+                          <div className="favicon" aria-hidden="true">
+                            {source.name.slice(0, 1).toUpperCase()}
+                          </div>
+                          <div>
+                            <strong>{source.name}</strong>
+                            <span>
+                              {source.type} · {source.lastStatus ?? 'new'}
+                            </span>
+                          </div>
+                          <div className="row-actions">
+                            <button disabled={busy} onClick={() => withBusy(() => refreshSource(source.id))}>
+                              Fetch
+                            </button>
+                            <button disabled={busy} onClick={() => withBusy(() => deleteSource(source.id))}>
+                              Delete
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+              );
+            })}
           </div>
         </aside>
 
