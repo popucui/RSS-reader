@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const sourceTypeSchema = z.enum(['rss', 'rsshub', 'x_user', 'x_search']);
+const sourceTypeSchema = z.enum(['rss', 'rsshub', 'x_user', 'x_search', 'web_page']);
 const topicSchema = z.enum(['ai', 'games', 'single-cell', 'biopharma', 'medicine', 'other']);
 
 export const sourceInputSchema = z.object({

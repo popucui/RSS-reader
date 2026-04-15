@@ -4,7 +4,7 @@ Use this file as shared operational context for Codex, Claude Code, and other co
 
 ## Project Summary
 
-`RSS-reader` is a local-first information reader for curated RSS/RSSHub/X sources. It currently aggregates AI-related sources and has a working TypeScript backend, SQLite persistence, and React/Vite frontend.
+`RSS-reader` is a local-first information reader for curated RSS/RSSHub/X/web-page sources. It currently aggregates AI-related sources and has a working TypeScript backend, SQLite persistence, and React/Vite frontend.
 
 The project is no longer only planning. Treat it as a working scaffold with real local data in `data/rss-reader.sqlite3`.
 
@@ -56,6 +56,7 @@ git push
 - `src/db/schema.ts`: SQLite connection, schema creation, idempotent lightweight migrations.
 - `src/db/repository.ts`: persistence methods for sources, items, topics, fetch runs, read/star state, request limits.
 - `src/fetchers/rss.ts`: RSS/Atom/RSSHub feed ingestion through `rss-parser`.
+- `src/fetchers/webPage.ts`: lightweight same-domain news/research link discovery for official pages that do not expose RSS.
 - `src/fetchers/x.ts`: official X API v2 REST ingestion for `x_user` and `x_search`.
 - `src/fetchers/index.ts`: source type dispatch.
 - `src/routes/api.ts`: REST API routes and manual refresh logic.
@@ -68,8 +69,9 @@ git push
 
 ## Implemented Features
 
-- Source CRUD for `rss`, `rsshub`, `x_user`, and `x_search`.
+- Source CRUD for `rss`, `rsshub`, `web_page`, `x_user`, and `x_search`.
 - RSS/RSSHub ingestion with dedupe.
+- Web-page ingestion for official news/research index pages that do not provide feeds.
 - Official X API ingestion with cost controls.
 - SQLite item archive with FTS5 search.
 - Topic labels for `ai`, `games`, `single-cell`, `biopharma`, `medicine`, and `other`.
@@ -90,8 +92,13 @@ Current database sources include:
 - `Dash Huang`: `@DashHuang`, type `x_user`, topic `ai`.
 - `Anthropic News`: `https://rss.datuan.dev/anthropic/news`, type `rsshub`, topic `ai`.
 - `Anthropic Research`: `https://rss.datuan.dev/anthropic/research`, type `rsshub`, topic `ai`.
+- `MiniMax News`: `https://www.minimax.io/news`, type `web_page`, topic `ai`.
+- `Zhipu News`: `https://www.zhipuai.cn/en/news`, type `web_page`, topic `ai`.
+- `xAI News`: `https://x.ai/news`, type `web_page`, topic `ai`, currently disabled because direct fetch returns HTTP 403.
 
 Do not assume these are seed fixtures. They live in the local SQLite database and may change.
+
+MiniMax Chinese/English news pages are largely duplicate, and MiniMax research currently repeats the news listing. Zhipu Chinese/English news pages are largely duplicate, and the research pages currently expose no clear article links. Prefer the English news pages unless this changes.
 
 ## X API Rules
 
@@ -107,6 +114,18 @@ Cost-saving behavior is important:
 - Manual refresh and scheduler refresh both respect fetch interval and daily request limits.
 
 Do not bypass these limits casually. If a debug command must bypass them, make that explicit and avoid accidental API spend.
+
+## Web Page Source Rules
+
+`web_page` sources are for official pages without RSS. They default to `fetchIntervalMinutes=1440` and `dailyRequestLimit=10`.
+
+The current adapter intentionally keeps scope narrow:
+
+- Fetch one HTML page only.
+- Extract same-origin links under `/news/` or `/research/`.
+- Do not crawl detail pages.
+- Dedupe by canonical URL.
+- Disable a source if it repeatedly returns blocking errors such as HTTP 403.
 
 ## Database Notes
 
@@ -151,7 +170,7 @@ curl -s http://127.0.0.1:4300/api/sources
 npm run refresh:source -- 3
 ```
 
-Be careful with `refresh:source` on X sources because it may spend API credits unless interval/daily limits skip the run.
+Be careful with `refresh:source` on X sources because it may spend API credits unless interval/daily limits skip the run. Web-page sources also respect interval and daily limits, but do not use paid X credits.
 
 ## Development Rules
 
@@ -162,3 +181,4 @@ Be careful with `refresh:source` on X sources because it may spend API credits u
 - Prefer small, testable increments.
 - Keep source adapters replaceable.
 - Prefer official or stable sources over brittle scraping; RSSHub is acceptable but should be treated as an external dependency.
+- When Chinese and English official pages duplicate each other, prefer one source, usually English, to avoid duplicate inbox items.

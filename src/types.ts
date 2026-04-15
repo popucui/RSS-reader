@@ -1,4 +1,4 @@
-export type SourceType = 'rss' | 'rsshub' | 'x_user' | 'x_search';
+export type SourceType = 'rss' | 'rsshub' | 'x_user' | 'x_search' | 'web_page';
 
 export type Topic =
   | 'ai'

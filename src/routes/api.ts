@@ -125,11 +125,11 @@ function applyCostAwareDefaults<T extends { type: string; fetchIntervalMinutes: 
   parsed: T,
   raw: unknown
 ): T {
-  if (parsed.type !== 'x_user' && parsed.type !== 'x_search') return parsed;
+  if (parsed.type !== 'x_user' && parsed.type !== 'x_search' && parsed.type !== 'web_page') return parsed;
   const body = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
   return {
     ...parsed,
     fetchIntervalMinutes: body.fetchIntervalMinutes === undefined ? 1440 : parsed.fetchIntervalMinutes,
-    dailyRequestLimit: body.dailyRequestLimit === undefined ? 2 : parsed.dailyRequestLimit
+    dailyRequestLimit: body.dailyRequestLimit === undefined ? (parsed.type === 'web_page' ? 10 : 2) : parsed.dailyRequestLimit
   };
 }

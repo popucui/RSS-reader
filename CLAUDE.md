@@ -4,7 +4,7 @@ This file gives Claude Code project context for `/home/cuijie/workspace/web_dev/
 
 ## Summary
 
-`RSS-reader` is a working local-first reader for curated RSS/RSSHub/X sources. It currently uses TypeScript + Node.js for the backend, SQLite for local storage, and React + Vite for the frontend.
+`RSS-reader` is a working local-first reader for curated RSS/RSSHub/X/web-page sources. It currently uses TypeScript + Node.js for the backend, SQLite for local storage, and React + Vite for the frontend.
 
 The app already runs locally and contains real user data in `data/rss-reader.sqlite3`. Preserve that data.
 
@@ -60,6 +60,7 @@ git push
 - Fastify.
 - SQLite via `better-sqlite3`.
 - RSS parsing via `rss-parser`.
+- Lightweight official web-page link discovery for sites without RSS.
 - X API through direct REST calls.
 - Scheduling via `node-cron`.
 - React + Vite frontend.
@@ -73,6 +74,7 @@ git push
 - `src/db/schema.ts`: SQLite schema and migrations.
 - `src/db/repository.ts`: database reads/writes and request-limit helpers.
 - `src/fetchers/rss.ts`: RSS/RSSHub ingestion.
+- `src/fetchers/webPage.ts`: same-domain news/research link discovery for official pages without feeds.
 - `src/fetchers/x.ts`: X API ingestion.
 - `src/fetchers/index.ts`: source dispatcher.
 - `src/routes/api.ts`: REST endpoints and refresh logic.
@@ -85,9 +87,10 @@ git push
 
 ## Current Features
 
-- Source management for `rss`, `rsshub`, `x_user`, and `x_search`.
+- Source management for `rss`, `rsshub`, `web_page`, `x_user`, and `x_search`.
 - Manual source refresh and refresh-all.
 - RSS/RSSHub ingestion and dedupe.
+- Web-page ingestion for official news/research index pages.
 - Official X API ingestion with cost controls.
 - SQLite archive and FTS5 search.
 - Topic tags: `ai`, `games`, `single-cell`, `biopharma`, `medicine`, `other`.
@@ -105,8 +108,13 @@ The local database currently includes:
 - `Dash Huang`: `@DashHuang`, type `x_user`.
 - `Anthropic News`: `https://rss.datuan.dev/anthropic/news`, type `rsshub`.
 - `Anthropic Research`: `https://rss.datuan.dev/anthropic/research`, type `rsshub`.
+- `MiniMax News`: `https://www.minimax.io/news`, type `web_page`.
+- `Zhipu News`: `https://www.zhipuai.cn/en/news`, type `web_page`.
+- `xAI News`: `https://x.ai/news`, type `web_page`, currently disabled because direct fetch returns HTTP 403.
 
 These are not static fixtures. Query `/api/sources` for current truth.
+
+MiniMax Chinese/English news pages are largely duplicate, and MiniMax research currently repeats the news listing. Zhipu Chinese/English news pages are largely duplicate, and the research pages currently expose no clear article links. Prefer the English news pages unless this changes.
 
 ## X API Cost Rules
 
@@ -120,6 +128,12 @@ Keep X usage conservative:
 - Fetch logs should expose auth, quota, rate-limit, and credit errors.
 
 The current implementation uses direct X API v2 REST calls. Do not introduce an SDK unless the package and version are verified installable.
+
+## Web Page Source Rules
+
+Use `web_page` only when there is no official RSS/feed route. Defaults should remain conservative: `fetchIntervalMinutes=1440`, `dailyRequestLimit=10`.
+
+The adapter fetches one HTML index page, extracts same-origin `/news/` or `/research/` links, does not crawl detail pages, and dedupes by canonical URL. Disable a source if it repeatedly returns blocking errors such as HTTP 403.
 
 ## Database
 
@@ -175,3 +189,4 @@ Use `npm run refresh:source -- <id>` carefully on X sources because successful n
 - Do not revert unrelated local changes.
 - Preserve existing source adapters and data contracts unless the change requires otherwise.
 - Prefer official feeds/APIs where available; RSSHub is acceptable but external and can fail.
+- When Chinese and English official pages duplicate each other, prefer one source, usually English, to avoid duplicate inbox items.

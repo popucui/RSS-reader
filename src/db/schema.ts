@@ -19,7 +19,7 @@ function migrate(db: Database.Database): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       url TEXT NOT NULL,
-      type TEXT NOT NULL CHECK (type IN ('rss', 'rsshub', 'x_user', 'x_search')),
+      type TEXT NOT NULL CHECK (type IN ('rss', 'rsshub', 'x_user', 'x_search', 'web_page')),
       external_id TEXT,
       topics TEXT NOT NULL DEFAULT '',
       enabled INTEGER NOT NULL DEFAULT 1,
@@ -93,11 +93,53 @@ function migrate(db: Database.Database): void {
     END;
   `);
   ensureColumn(db, 'sources', 'external_id', 'TEXT');
+  ensureWebPageSourceType(db);
 }
 
 function ensureColumn(db: Database.Database, table: string, column: string, definition: string): void {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (!rows.some((row) => row.name === column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+function ensureWebPageSourceType(db: Database.Database): void {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sources'")
+    .get() as { sql: string } | undefined;
+  if (!row?.sql || row.sql.includes("'web_page'")) return;
+
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.exec(`
+      CREATE TABLE sources_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        url TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('rss', 'rsshub', 'x_user', 'x_search', 'web_page')),
+        external_id TEXT,
+        topics TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        fetch_interval_minutes INTEGER NOT NULL DEFAULT 30,
+        daily_request_limit INTEGER NOT NULL DEFAULT 100,
+        last_fetch_at TEXT,
+        last_status TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO sources_new (
+        id, name, url, type, external_id, topics, enabled, fetch_interval_minutes,
+        daily_request_limit, last_fetch_at, last_status, created_at
+      )
+      SELECT
+        id, name, url, type, external_id, topics, enabled, fetch_interval_minutes,
+        daily_request_limit, last_fetch_at, last_status, created_at
+      FROM sources;
+
+      DROP TABLE sources;
+      ALTER TABLE sources_new RENAME TO sources;
+    `);
+  } finally {
+    db.pragma('foreign_keys = ON');
   }
 }

@@ -15,9 +15,9 @@ import {
 import './styles.css';
 
 const topics: Topic[] = ['ai', 'games', 'single-cell', 'biopharma', 'medicine', 'other'];
-const sourceTypes: SourceType[] = ['rss', 'rsshub', 'x_user', 'x_search'];
+const sourceTypes: SourceType[] = ['rss', 'rsshub', 'web_page', 'x_user', 'x_search'];
 const sourceGroups: Array<{ id: string; label: string; types: SourceType[] }> = [
-  { id: 'rss-websites', label: 'RSS / Websites', types: ['rss', 'rsshub'] },
+  { id: 'rss-websites', label: 'RSS / Websites', types: ['rss', 'rsshub', 'web_page'] },
   { id: 'x-users', label: 'X Users', types: ['x_user'] },
   { id: 'x-searches', label: 'X Searches', types: ['x_search'] }
 ];
@@ -202,8 +202,15 @@ export default function App() {
                       ...current,
                       type: nextType,
                       fetchIntervalMinutes:
-                        nextType === 'x_user' || nextType === 'x_search' ? 1440 : current.fetchIntervalMinutes,
-                      dailyRequestLimit: nextType === 'x_user' || nextType === 'x_search' ? 2 : current.dailyRequestLimit
+                        nextType === 'x_user' || nextType === 'x_search' || nextType === 'web_page'
+                          ? 1440
+                          : current.fetchIntervalMinutes,
+                      dailyRequestLimit:
+                        nextType === 'x_user' || nextType === 'x_search'
+                          ? 2
+                          : nextType === 'web_page'
+                            ? 10
+                            : current.dailyRequestLimit
                     }));
                   }}
                 >
