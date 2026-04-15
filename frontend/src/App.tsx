@@ -32,6 +32,12 @@ const emptySource: SourceInput = {
   dailyRequestLimit: 100
 };
 
+function previewText(value: string | null | undefined, maxLength = 420) {
+  if (!value) return '';
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
 export default function App() {
   const [sources, setSources] = useState<Source[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -354,7 +360,7 @@ export default function App() {
                     {item.title}
                   </a>
                 </h2>
-                {item.summary ? <p>{item.summary}</p> : null}
+                {item.summary ? <p>{previewText(item.summary)}</p> : null}
                 <div className="item-footer">
                   <div className="tags">
                     {item.topics.map((itemTopic) => (
