@@ -53,47 +53,18 @@ export async function fetchWebPageSource(source: Source, maxItems: number): Prom
 }
 
 async function fetchMiniMaxNewsSource(source: Source, maxItems: number): Promise<FetchResult> {
-  let requestCount = 0;
   try {
-    const [homeTech, research] = await Promise.all([
-      fetchMiniMaxSetting('home_tech_list').then((value) => {
-        requestCount += 1;
-        return value;
-      }),
-      fetchMiniMaxSetting('research_list').then((value) => {
-        requestCount += 1;
-        return value;
-      })
-    ]);
+    const response = await fetch('https://www.minimaxi.com/nezha/en/news?page=1', {
+      headers: {
+        'User-Agent': 'RSS-reader/0.1 (+local-first information reader)',
+        Accept: 'application/json'
+      }
+    });
+    if (!response.ok) throw new Error(`MiniMax news failed: HTTP ${response.status}`);
+    const body = (await response.json()) as { data?: Array<Record<string, unknown>> };
+    const candidates = (body.data ?? []).slice(0, maxItems).map((entry) => miniMaxNewsCandidate(entry));
 
-    const candidates = [
-      ...miniMaxHomeTechCandidates(homeTech),
-      ...miniMaxResearchCandidates(research)
-    ];
-    const seen = new Set<string>();
-    const selected: LinkCandidate[] = [];
-    for (const candidate of candidates) {
-      if (seen.has(candidate.url)) continue;
-      seen.add(candidate.url);
-      selected.push(candidate);
-      if (selected.length >= maxItems) break;
-    }
-
-    const enriched = await Promise.all(
-      selected.map(async (candidate) => {
-        if (candidate.publishedAt) return candidate;
-        const detail = await fetchMiniMaxArticleMetadata(candidate.url);
-        requestCount += 1;
-        return {
-          ...candidate,
-          title: detail.title || candidate.title,
-          summary: detail.summary || candidate.summary,
-          publishedAt: detail.publishedAt
-        };
-      })
-    );
-
-    const items: NormalizedItem[] = enriched.map((candidate) => ({
+    const items: NormalizedItem[] = candidates.map((candidate) => ({
       guid: candidate.url,
       canonicalUrl: candidate.url,
       title: candidate.title,
@@ -103,12 +74,12 @@ async function fetchMiniMaxNewsSource(source: Source, maxItems: number): Promise
       publishedAt: candidate.publishedAt,
       topics: classifyText(`${candidate.title}\n${candidate.summary}`, source.topics)
     }));
-    return { status: 'ok', items, requestCount };
+    return { status: 'ok', items, requestCount: 1 };
   } catch (error) {
     return {
       status: 'error',
       items: [],
-      requestCount,
+      requestCount: 1,
       error: error instanceof Error ? error.message : String(error)
     };
   }
@@ -210,96 +181,18 @@ function isMiniMaxNewsSource(value: string): boolean {
   }
 }
 
-async function fetchMiniMaxSetting(key: string): Promise<unknown> {
-  const response = await fetch(`https://www.minimax.io/setting/get_app_settings?fe_setting_key=${key}`, {
-    headers: {
-      'User-Agent': 'RSS-reader/0.1 (+local-first information reader)',
-      Accept: 'application/json'
-    }
-  });
-  if (!response.ok) throw new Error(`MiniMax settings ${key} failed: HTTP ${response.status}`);
-  const body = (await response.json()) as { data?: unknown };
-  return body.data;
-}
-
-function miniMaxHomeTechCandidates(data: unknown): LinkCandidate[] {
-  const list = getPath<Array<Record<string, unknown>>>(data, ['en', 'techList']) ?? [];
-  return list
-    .map((entry): LinkCandidate | null => {
-      const title = stringValue(entry.title);
-      const summary = stringValue(entry.subTitle);
-      const url = miniMaxUrl(stringValue(entry.linkUrl));
-      if (!title || !url) return null;
-      return { url, title, summary, publishedAt: null };
-    })
-    .filter((entry): entry is LinkCandidate => entry !== null);
-}
-
-function miniMaxResearchCandidates(data: unknown): LinkCandidate[] {
-  const list = getPath<Array<Record<string, unknown>>>(data, ['en', 'researchList']) ?? [];
-  return list
-    .map((entry) => {
-      const title = stringValue(entry.title);
-      const summary = stringValue(entry.summary);
-      const slug = stringValue(entry.slug);
-      if (!title || !slug) return null;
-      return {
-        url: `https://www.minimax.io/news/${slug}`,
-        title,
-        summary,
-        publishedAt: stringValue(entry.publishDate) || null
-      };
-    })
-    .filter((entry): entry is LinkCandidate => entry !== null);
-}
-
-async function fetchMiniMaxArticleMetadata(url: string): Promise<{ title: string; summary: string; publishedAt: string | null }> {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'RSS-reader/0.1 (+local-first information reader)',
-      Accept: 'text/html,application/xhtml+xml'
-    }
-  });
-  if (!response.ok) return { title: '', summary: '', publishedAt: null };
-  const html = await response.text();
+function miniMaxNewsCandidate(entry: Record<string, unknown>): LinkCandidate {
+  const title = stringValue(entry.title) || 'Untitled MiniMax news';
+  const slug = stringValue(entry.slug);
+  const summary = stringValue(entry.summary);
   return {
-    title: jsonLdValue(html, 'headline') || metaValue(html, 'og:title') || '',
-    summary: jsonLdValue(html, 'description') || metaValue(html, 'description') || metaValue(html, 'og:description') || '',
-    publishedAt: jsonLdValue(html, 'datePublished') || null
+    url: stringValue(entry.externalLink) || (slug ? `https://www.minimax.io/news/${slug}` : 'https://www.minimax.io/news'),
+    title,
+    summary,
+    publishedAt: stringValue(entry.publishDate) || null
   };
-}
-
-function miniMaxUrl(value: string): string {
-  if (!value) return '';
-  try {
-    return new URL(value, 'https://www.minimax.io').href;
-  } catch {
-    return '';
-  }
-}
-
-function getPath<T>(value: unknown, path: string[]): T | undefined {
-  let current = value;
-  for (const key of path) {
-    if (typeof current !== 'object' || current === null || !(key in current)) return undefined;
-    current = (current as Record<string, unknown>)[key];
-  }
-  return current as T;
 }
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function jsonLdValue(html: string, key: string): string {
-  const match = html.match(new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`, 'i'));
-  return match ? decodeEntities(match[1]).trim() : '';
-}
-
-function metaValue(html: string, key: string): string {
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = html.match(
-    new RegExp(`<meta[^>]+(?:property|name)=["']${escapedKey}["'][^>]+content=["']([^"']*)["'][^>]*>`, 'i')
-  );
-  return match ? decodeEntities(match[1]).trim() : '';
 }
