@@ -135,6 +135,8 @@ Use `web_page` only when there is no official RSS/feed route. Defaults should re
 
 The adapter fetches one HTML index page, extracts same-origin `/news/` or `/research/` links, does not crawl detail pages, and dedupes by canonical URL. Disable a source if it repeatedly returns blocking errors such as HTTP 403.
 
+MiniMax News is a special case. `https://www.minimax.io/news` renders a skeleton and mixes navigation links into static HTML, so the adapter reads MiniMax's public settings endpoints for `home_tech_list` and `research_list`, then enriches current top items from detail-page JSON-LD dates. Expect about 8 ordinary web requests for one MiniMax refresh.
+
 ## Database
 
 SQLite database path defaults to:
