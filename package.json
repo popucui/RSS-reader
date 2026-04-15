@@ -1,0 +1,43 @@
+{
+  "name": "rss-reader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "tsx watch src/server.ts",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "npm run typecheck && vite build && tsup src/server.ts --format esm --platform node --out-dir dist --clean",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "eslint .",
+    "refresh:source": "tsx src/tools/refresh-source.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/static": "^8.3.0",
+    "better-sqlite3": "^12.4.6",
+    "dotenv": "^17.2.3",
+    "fastify": "^5.6.2",
+    "node-cron": "^4.2.1",
+    "rss-parser": "^3.13.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.1",
+    "tsx": "^4.20.6",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4",
+    "vitest": "^4.0.13",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}
