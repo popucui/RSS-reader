@@ -33,6 +33,27 @@ npm run refresh:source -- <source-id>
 
 `.env` exists locally and contains `X_BEARER_TOKEN`. Never print, expose, overwrite, or commit it.
 
+## GitHub Remote
+
+Use SSH authentication for GitHub push/pull operations.
+
+Remote:
+
+```text
+git@github.com:popucui/RSS-reader.git
+```
+
+Keep `origin` on the SSH URL. Do not switch it back to HTTPS unless explicitly requested.
+
+Typical update flow:
+
+```bash
+git status --short
+git add .
+git commit -m "<message>"
+git push
+```
+
 ## Stack
 
 - TypeScript + Node.js.

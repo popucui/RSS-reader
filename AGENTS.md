@@ -30,6 +30,25 @@ npm run refresh:source -- <source-id>
 
 `.env` is used for runtime configuration and must not be committed. `X_BEARER_TOKEN` is present locally for official X API access.
 
+## GitHub Remote
+
+The repository is pushed to GitHub at:
+
+```text
+git@github.com:popucui/RSS-reader.git
+```
+
+Use SSH authentication for GitHub operations by default. The local `origin` remote should stay on the SSH URL, not the HTTPS URL.
+
+Common update flow:
+
+```bash
+git status --short
+git add .
+git commit -m "<message>"
+git push
+```
+
 ## Architecture
 
 - `src/server.ts`: Fastify server, API registration, optional static frontend serving after build.
