@@ -12,6 +12,9 @@ export async function fetchWebPageSource(source: Source, maxItems: number): Prom
   if (isMiniMaxNewsSource(source.url)) {
     return fetchMiniMaxNewsSource(source, maxItems);
   }
+  if (isZhipuResearchSource(source.url)) {
+    return fetchZhipuResearchSource(source, maxItems);
+  }
 
   try {
     const response = await fetch(source.url, {
@@ -36,7 +39,7 @@ export async function fetchWebPageSource(source: Source, maxItems: number): Prom
       canonicalUrl: candidate.url,
       title: candidate.title,
       author: new URL(source.url).hostname,
-      summary: candidate.summary || `Discovered from ${source.name}`,
+      summary: candidate.summary || null,
       contentText: candidate.summary || candidate.title,
       publishedAt: candidate.publishedAt,
       topics: classifyText(candidate.title, source.topics)
@@ -69,7 +72,40 @@ async function fetchMiniMaxNewsSource(source: Source, maxItems: number): Promise
       canonicalUrl: candidate.url,
       title: candidate.title,
       author: new URL(source.url).hostname,
-      summary: candidate.summary || `Discovered from ${source.name}`,
+      summary: candidate.summary || null,
+      contentText: candidate.summary || candidate.title,
+      publishedAt: candidate.publishedAt,
+      topics: classifyText(`${candidate.title}\n${candidate.summary}`, source.topics)
+    }));
+    return { status: 'ok', items, requestCount: 1 };
+  } catch (error) {
+    return {
+      status: 'error',
+      items: [],
+      requestCount: 1,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function fetchZhipuResearchSource(source: Source, maxItems: number): Promise<FetchResult> {
+  try {
+    const response = await fetch(source.url, {
+      headers: {
+        'User-Agent': 'RSS-reader/0.1 (+local-first information reader)',
+        Accept: 'text/html,application/xhtml+xml'
+      }
+    });
+    const html = await response.text();
+    if (!response.ok) throw new Error(`Zhipu research failed: HTTP ${response.status}`);
+
+    const candidates = extractZhipuResearchItems(html, source.url, maxItems);
+    const items: NormalizedItem[] = candidates.map((candidate) => ({
+      guid: candidate.url,
+      canonicalUrl: candidate.url,
+      title: candidate.title,
+      author: new URL(source.url).hostname,
+      summary: candidate.summary || null,
       contentText: candidate.summary || candidate.title,
       publishedAt: candidate.publishedAt,
       topics: classifyText(`${candidate.title}\n${candidate.summary}`, source.topics)
@@ -181,6 +217,15 @@ function isMiniMaxNewsSource(value: string): boolean {
   }
 }
 
+function isZhipuResearchSource(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.hostname === 'www.zhipuai.cn' && url.pathname.replace(/\/$/, '') === '/en/research';
+  } catch {
+    return false;
+  }
+}
+
 function miniMaxNewsCandidate(entry: Record<string, unknown>): LinkCandidate {
   const title = stringValue(entry.title) || 'Untitled MiniMax news';
   const slug = stringValue(entry.slug);
@@ -191,6 +236,125 @@ function miniMaxNewsCandidate(entry: Record<string, unknown>): LinkCandidate {
     summary,
     publishedAt: stringValue(entry.publishDate) || null
   };
+}
+
+function extractZhipuResearchItems(html: string, pageUrl: string, maxItems: number): LinkCandidate[] {
+  const page = new URL(pageUrl);
+  const items = extractZhipuBlogsItems(html)
+    .map((entry) => zhipuResearchCandidate(entry, page))
+    .filter((candidate): candidate is LinkCandidate => candidate !== null)
+    .sort((a, b) => dateMs(b.publishedAt) - dateMs(a.publishedAt));
+  return items.slice(0, maxItems);
+}
+
+function extractZhipuBlogsItems(html: string): Array<Record<string, unknown>> {
+  const scriptPattern = /<script>self\.__next_f\.push\(\[1,"([\s\S]*?)"\]\)<\/script>/g;
+  for (const match of html.matchAll(scriptPattern)) {
+    const payload = decodeJsonStringLiteral(match[1]);
+    if (!payload.includes('"blogsItems"')) continue;
+    const arrayText = extractJsonArrayAfter(payload, '"blogsItems"');
+    if (!arrayText) continue;
+    try {
+      const parsed = JSON.parse(arrayText) as unknown;
+      if (Array.isArray(parsed)) return parsed.filter(isRecord);
+    } catch {
+      continue;
+    }
+  }
+  return [];
+}
+
+function zhipuResearchCandidate(entry: Record<string, unknown>, pageUrl: URL): LinkCandidate | null {
+  const id = numberOrStringValue(entry.id);
+  const title = stringValue(entry.title_en) || stringValue(entry.title_zh);
+  if (!id || !title) return null;
+
+  const summary =
+    stringValue(entry.resume_en) || stringValue(entry.resume_zh) || extractLexicalText(entry.content_en) || extractLexicalText(entry.content_zh);
+  const link = stringValue(entry.link);
+  const url = link || new URL(`/en/research/${id}`, pageUrl).href;
+  return {
+    url,
+    title,
+    summary: limitText(summary, 240),
+    publishedAt: stringValue(entry.createAt) || null
+  };
+}
+
+function extractJsonArrayAfter(value: string, key: string): string | null {
+  const keyIndex = value.indexOf(key);
+  if (keyIndex === -1) return null;
+  const start = value.indexOf('[', keyIndex);
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index += 1) {
+    const char = value[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === '[') {
+      depth += 1;
+    } else if (char === ']') {
+      depth -= 1;
+      if (depth === 0) return value.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
+function decodeJsonStringLiteral(value: string): string {
+  try {
+    return JSON.parse(`"${value}"`) as string;
+  } catch {
+    return value;
+  }
+}
+
+function extractLexicalText(value: unknown): string {
+  const texts: string[] = [];
+  collectLexicalText(value, texts);
+  return texts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function collectLexicalText(value: unknown, texts: string[]): void {
+  if (texts.join(' ').length > 320) return;
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectLexicalText(entry, texts));
+    return;
+  }
+  if (!isRecord(value)) return;
+  const text = stringValue(value.text);
+  if (text) texts.push(text);
+  collectLexicalText(value.root, texts);
+  collectLexicalText(value.children, texts);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function numberOrStringValue(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return stringValue(value);
+}
+
+function dateMs(value: string | null): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function stringValue(value: unknown): string {

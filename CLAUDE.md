@@ -109,12 +109,12 @@ The local database currently includes:
 - `Anthropic News`: `https://rss.datuan.dev/anthropic/news`, type `rsshub`.
 - `Anthropic Research`: `https://rss.datuan.dev/anthropic/research`, type `rsshub`.
 - `MiniMax News`: `https://www.minimax.io/news`, type `web_page`.
-- `Zhipu News`: `https://www.zhipuai.cn/en/news`, type `web_page`.
+- `Zhipu Research`: `https://www.zhipuai.cn/en/research`, type `web_page`.
 - `xAI News`: `https://x.ai/news`, type `web_page`, currently disabled because direct fetch returns HTTP 403.
 
 These are not static fixtures. Query `/api/sources` for current truth.
 
-MiniMax Chinese/English news pages are largely duplicate, and MiniMax research currently repeats the news listing. Zhipu Chinese/English news pages are largely duplicate, and the research pages currently expose no clear article links. Prefer the English news pages unless this changes.
+MiniMax Chinese/English news pages are largely duplicate, and MiniMax research currently repeats the news listing. Zhipu research updates more frequently than Zhipu news, so use the English research page and fall back to Chinese titles when the English fields are blank.
 
 ## X API Cost Rules
 
@@ -136,6 +136,8 @@ Use `web_page` only when there is no official RSS/feed route. Defaults should re
 The adapter fetches one HTML index page, extracts same-origin `/news/` or `/research/` links, does not crawl detail pages, and dedupes by canonical URL. Disable a source if it repeatedly returns blocking errors such as HTTP 403.
 
 MiniMax News is a special case. `https://www.minimax.io/news` renders a skeleton and mixes navigation links into static HTML, while the visible news cards come from `https://www.minimaxi.com/nezha/en/news?page=1`. Use that endpoint so ingested items match the web page. Expect 1 ordinary web request for one MiniMax refresh.
+
+Zhipu Research is also a special case. `https://www.zhipuai.cn/en/research` renders rows from embedded Next.js hydration data rather than ordinary article anchors. Parse `blogsItems`, use `/en/research/{id}` as the canonical URL, and fall back from `title_en`/`resume_en` to `title_zh`/`resume_zh` or the first content text because current English rows can render with blank title text.
 
 ## Database
 
