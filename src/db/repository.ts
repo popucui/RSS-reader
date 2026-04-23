@@ -5,6 +5,7 @@ import type { FetchRun, Item, NormalizedItem, Source, SourceType, Topic } from '
 
 interface SourceRow {
   id: number;
+  user_id: number;
   name: string;
   url: string;
   type: SourceType;
@@ -15,6 +16,13 @@ interface SourceRow {
   daily_request_limit: number;
   last_fetch_at: string | null;
   last_status: string | null;
+  created_at: string;
+}
+
+interface UserRow {
+  id: number;
+  email: string;
+  password_hash: string;
   created_at: string;
 }
 
@@ -52,6 +60,7 @@ interface FetchRunRow {
 function toSource(row: SourceRow): Source {
   return {
     id: row.id,
+    userId: row.user_id,
     name: row.name,
     url: row.url,
     type: row.type,
@@ -111,17 +120,26 @@ function itemHash(item: NormalizedItem): string {
 export class Repository {
   constructor(private readonly db: Database.Database) {}
 
-  listSources(): Source[] {
-    const rows = this.db.prepare('SELECT * FROM sources ORDER BY name COLLATE NOCASE').all() as SourceRow[];
+  listSources(userId?: number): Source[] {
+    const sql = userId
+      ? 'SELECT * FROM sources WHERE user_id = ? ORDER BY name COLLATE NOCASE'
+      : 'SELECT * FROM sources ORDER BY name COLLATE NOCASE';
+    const params = userId ? [userId] : [];
+    const rows = this.db.prepare(sql).all(...params) as SourceRow[];
     return rows.map(toSource);
   }
 
-  getSource(id: number): Source | null {
-    const row = this.db.prepare('SELECT * FROM sources WHERE id = ?').get(id) as SourceRow | undefined;
+  getSource(id: number, userId?: number): Source | null {
+    const sql = userId
+      ? 'SELECT * FROM sources WHERE id = ? AND user_id = ?'
+      : 'SELECT * FROM sources WHERE id = ?';
+    const params = userId ? [id, userId] : [id];
+    const row = this.db.prepare(sql).get(...params) as SourceRow | undefined;
     return row ? toSource(row) : null;
   }
 
   createSource(input: {
+    userId: number;
     name: string;
     url: string;
     type: SourceType;
@@ -132,10 +150,11 @@ export class Repository {
   }): Source {
     const result = this.db
       .prepare(
-        `INSERT INTO sources (name, url, type, topics, enabled, fetch_interval_minutes, daily_request_limit)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sources (user_id, name, url, type, topics, enabled, fetch_interval_minutes, daily_request_limit)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
+        input.userId,
         input.name,
         input.url,
         input.type,
@@ -147,15 +166,15 @@ export class Repository {
     return this.getSource(Number(result.lastInsertRowid)) as Source;
   }
 
-  updateSource(id: number, input: Partial<Omit<Source, 'id' | 'createdAt' | 'lastFetchAt' | 'lastStatus'>>): Source | null {
-    const current = this.getSource(id);
+  updateSource(id: number, input: Partial<Omit<Source, 'id' | 'userId' | 'createdAt' | 'lastFetchAt' | 'lastStatus'>>, userId?: number): Source | null {
+    const current = this.getSource(id, userId);
     if (!current) return null;
     const next = { ...current, ...input };
     this.db
       .prepare(
         `UPDATE sources
          SET name = ?, url = ?, type = ?, topics = ?, enabled = ?, fetch_interval_minutes = ?, daily_request_limit = ?
-         WHERE id = ?`
+         WHERE id = ?${userId ? ' AND user_id = ?' : ''}`
       )
       .run(
         next.name,
@@ -165,13 +184,16 @@ export class Repository {
         next.enabled ? 1 : 0,
         next.fetchIntervalMinutes,
         next.dailyRequestLimit,
-        id
+        id,
+        ...(userId ? [userId] : [])
       );
-    return this.getSource(id);
+    return this.getSource(id, userId);
   }
 
-  deleteSource(id: number): boolean {
-    const result = this.db.prepare('DELETE FROM sources WHERE id = ?').run(id);
+  deleteSource(id: number, userId?: number): boolean {
+    const sql = userId ? 'DELETE FROM sources WHERE id = ? AND user_id = ?' : 'DELETE FROM sources WHERE id = ?';
+    const params = userId ? [id, userId] : [id];
+    const result = this.db.prepare(sql).run(...params);
     return result.changes > 0;
   }
 
@@ -191,7 +213,7 @@ export class Repository {
     };
   }
 
-  listItems(filters: { topic?: string; sourceId?: number; unread?: boolean; q?: string; limit?: number }): Item[] {
+  listItems(filters: { userId?: number; topic?: string; sourceId?: number; unread?: boolean; q?: string; limit?: number }): Item[] {
     const params: Array<string | number> = [];
     const where: string[] = [];
     let join = '';
@@ -212,6 +234,10 @@ export class Repository {
     }
     if (filters.unread) {
       where.push('items.read_at IS NULL');
+    }
+    if (filters.userId) {
+      where.push('sources.user_id = ?');
+      params.push(filters.userId);
     }
 
     const sql = `
@@ -246,7 +272,7 @@ export class Repository {
     const tx = this.db.transaction(() => {
       for (const item of items) {
         const hash = itemHash(item);
-        const result = insertItem.run(
+        const result = insertItem.run([
           source.id,
           item.guid ?? null,
           item.canonicalUrl,
@@ -256,7 +282,7 @@ export class Repository {
           item.contentText ?? null,
           item.publishedAt ?? null,
           hash
-        );
+        ]);
         const row = findItem.get(source.id, hash) as { id: number } | undefined;
         if (!row) continue;
         if (result.changes > 0) inserted += 1;
@@ -302,28 +328,82 @@ export class Repository {
     return row.count;
   }
 
-  listFetchRuns(limit = 50): FetchRun[] {
-    const rows = this.db
-      .prepare(
-        `SELECT fetch_runs.*, sources.name AS source_name
+  listFetchRuns(userId?: number, limit = 50): FetchRun[] {
+    const sql = userId
+      ? `SELECT fetch_runs.*, sources.name AS source_name
+         FROM fetch_runs
+         JOIN sources ON sources.id = fetch_runs.source_id AND sources.user_id = ?
+         ORDER BY fetch_runs.started_at DESC
+         LIMIT ?`
+      : `SELECT fetch_runs.*, sources.name AS source_name
          FROM fetch_runs
          JOIN sources ON sources.id = fetch_runs.source_id
          ORDER BY fetch_runs.started_at DESC
-         LIMIT ?`
-      )
-      .all(limit) as FetchRunRow[];
+         LIMIT ?`;
+    const params = userId ? [userId, limit] : [limit];
+    const rows = this.db.prepare(sql).all(...params) as FetchRunRow[];
     return rows.map(toFetchRun);
   }
 
-  markRead(id: number, read: boolean): boolean {
+  markRead(id: number, read: boolean, userId?: number): boolean {
     const result = this.db
-      .prepare("UPDATE items SET read_at = CASE WHEN ? THEN datetime('now') ELSE NULL END WHERE id = ?")
-      .run(read ? 1 : 0, id);
+      .prepare(
+        `UPDATE items
+         SET read_at = CASE WHEN ? THEN datetime('now') ELSE NULL END
+         WHERE id = ?${userId ? ' AND source_id IN (SELECT id FROM sources WHERE user_id = ?)' : ''}`
+      )
+      .run(read ? 1 : 0, id, ...(userId ? [userId] : []));
     return result.changes > 0;
   }
 
-  setStarred(id: number, starred: boolean): boolean {
-    const result = this.db.prepare('UPDATE items SET starred = ? WHERE id = ?').run(starred ? 1 : 0, id);
+  setStarred(id: number, starred: boolean, userId?: number): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE items
+         SET starred = ?
+         WHERE id = ?${userId ? ' AND source_id IN (SELECT id FROM sources WHERE user_id = ?)' : ''}`
+      )
+      .run(starred ? 1 : 0, id, ...(userId ? [userId] : []));
     return result.changes > 0;
+  }
+
+  // User methods
+  findUserByEmail(email: string): { id: number; email: string; passwordHash: string } | null {
+    const row = this.db.prepare('SELECT * FROM users WHERE email = ?').get(email) as UserRow | undefined;
+    if (!row) return null;
+    return { id: row.id, email: row.email, passwordHash: row.password_hash };
+  }
+
+  findUserById(id: number): { id: number; email: string; passwordHash: string } | null {
+    const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+    if (!row) return null;
+    return { id: row.id, email: row.email, passwordHash: row.password_hash };
+  }
+
+  createUser(input: { email: string; passwordHash: string }): { id: number; email: string } {
+    const result = this.db
+      .prepare('INSERT INTO users (email, password_hash) VALUES (?, ?)')
+      .run(input.email, input.passwordHash);
+    return { id: Number(result.lastInsertRowid), email: input.email };
+  }
+
+  updateUserPassword(userId: number, passwordHash: string): boolean {
+    const result = this.db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, userId);
+    return result.changes > 0;
+  }
+
+  adoptLegacySourcesForUser(userId: number): number {
+    const targetSourceCount = this.db
+      .prepare('SELECT COUNT(*) AS count FROM sources WHERE user_id = ?')
+      .get(userId) as { count: number };
+    if (targetSourceCount.count > 0) return 0;
+
+    const legacyUser = this.db
+      .prepare("SELECT id FROM users WHERE email = 'default@localhost' AND password_hash = ''")
+      .get() as { id: number } | undefined;
+    if (!legacyUser || legacyUser.id === userId) return 0;
+
+    const result = this.db.prepare('UPDATE sources SET user_id = ? WHERE user_id = ?').run(userId, legacyUser.id);
+    return result.changes;
   }
 }

@@ -4,7 +4,7 @@ Use this file as shared operational context for Codex, Claude Code, and other co
 
 ## Project Summary
 
-`RSS-reader` is a local-first information reader for curated RSS/RSSHub/X/web-page sources. It currently aggregates AI-related sources and has a working TypeScript backend, SQLite persistence, and React/Vite frontend.
+`RSS-reader` is a local-first information reader for curated RSS/RSSHub/X/web-page sources. It currently aggregates AI-related sources and has a working TypeScript backend, SQLite persistence, JWT-based user authentication, and React/Vite frontend.
 
 The project is no longer only planning. Treat it as a working scaffold with real local data in `data/rss-reader.sqlite3`.
 
@@ -60,6 +60,7 @@ git push
 - `src/fetchers/x.ts`: official X API v2 REST ingestion for `x_user` and `x_search`.
 - `src/fetchers/index.ts`: source type dispatch.
 - `src/routes/api.ts`: REST API routes and manual refresh logic.
+- `src/routes/auth.ts`: auth routes for registration, login, current user lookup, and password changes.
 - `src/routes/schemas.ts`: Zod validation schemas.
 - `src/scheduler.ts`: `node-cron` polling, respecting per-source interval and daily request limits.
 - `src/tools/refresh-source.ts`: CLI helper to refresh a single source without relying on the dev server.
@@ -70,6 +71,8 @@ git push
 ## Implemented Features
 
 - Source CRUD for `rss`, `rsshub`, `web_page`, `x_user`, and `x_search`.
+- User registration, login, logout, current-session restore, and password change.
+- JWT-protected API routes for user-specific reader data.
 - RSS/RSSHub ingestion with dedupe.
 - Web-page ingestion for official news/research index pages that do not provide feeds.
 - Official X API ingestion with cost controls.
@@ -83,6 +86,22 @@ git push
 - Unread/read visual states.
 - Independent scrolling for the source panel and main content panel.
 - Fetch log is a tab in the main content panel, not a bottom section.
+
+## User/Auth Notes
+
+Authentication uses `@fastify/jwt` with bearer tokens stored by the frontend in `localStorage` under `rss_reader_token`.
+
+Important behavior:
+
+- `/api/auth/register` and `/api/auth/login` are public and return `{ token, user }`.
+- `/api/auth/me` verifies the token and returns the current user.
+- `/api/auth/password` verifies the token, checks the current password with bcrypt, and stores a new bcrypt hash.
+- Most `/api/*` routes are protected by the global `onRequest` hook in `src/server.ts`; `/api/health` and `/api/auth/*` are the exceptions.
+- Sources, fetch logs, and item listing are filtered by the authenticated user's sources.
+- Read/star mutations must stay scoped to items belonging to the authenticated user's sources.
+- Legacy local sources were migrated through a placeholder `default@localhost` user. `Repository.adoptLegacySourcesForUser()` moves those old sources to the first real authenticated user that has no sources yet. Do not remove this compatibility behavior without an explicit data migration.
+
+The current active local user is typically `popucui@gmail.com`; do not hard-code this in app logic.
 
 ## Current Local Sources
 
@@ -137,7 +156,8 @@ SQLite path defaults to `./data/rss-reader.sqlite3`.
 
 Core tables:
 
-- `sources`: includes `external_id`, default topics, source type, enabled flag, fetch interval, daily request limit, last status.
+- `users`: local auth records with unique email and bcrypt password hash.
+- `sources`: includes `user_id`, `external_id`, default topics, source type, enabled flag, fetch interval, daily request limit, last status.
 - `items`: normalized item records with read/star state and dedupe hash.
 - `item_topics`: item-topic labels.
 - `fetch_runs`: per-source fetch status, item counts, new counts, request counts, and errors.
@@ -150,6 +170,8 @@ Keep migrations idempotent in `src/db/schema.ts`. Preserve existing user data.
 The current UI is a functional reader, not a landing page:
 
 - Keep the first screen as source management + inbox.
+- Keep the authenticated user controls separate from sources/items metrics so long emails cannot overlap stats.
+- Keep password change available from the signed-in user area.
 - Preserve independent scrolling between left sources and right content.
 - Keep fetch log as a tab, not a bottom panel.
 - Preserve click-title-to-mark-read behavior.
@@ -172,6 +194,15 @@ For behavior checks:
 curl -s http://127.0.0.1:4300/api/health
 curl -s http://127.0.0.1:4300/api/sources
 npm run refresh:source -- 3
+```
+
+Most API routes now require a bearer token. For authenticated behavior checks, log in first and pass `Authorization: Bearer <token>`:
+
+```bash
+curl -s -X POST http://127.0.0.1:4300/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"popucui@gmail.com","password":"<password>"}'
+curl -s http://127.0.0.1:4300/api/sources -H "Authorization: Bearer <token>"
 ```
 
 Be careful with `refresh:source` on X sources because it may spend API credits unless interval/daily limits skip the run. Web-page sources also respect interval and daily limits, but do not use paid X credits.

@@ -20,7 +20,9 @@ export const config = {
   databasePath: process.env.DATABASE_PATH ?? './data/rss-reader.sqlite3',
   fetchIntervalMinutes: intFromEnv('FETCH_INTERVAL_MINUTES', 30),
   maxItemsPerFetch: intFromEnv('MAX_ITEMS_PER_FETCH', 30),
-  xBearerToken: process.env.X_BEARER_TOKEN ?? ''
+  xBearerToken: process.env.X_BEARER_TOKEN ?? '',
+  clashSourceUrl: process.env.CLASH_SOURCE_URL ?? '',
+  clashRefreshIntervalMinutes: intFromEnv('CLASH_REFRESH_INTERVAL_MINUTES', 60)
 };
 
 export function resolveProjectPath(value: string): string {

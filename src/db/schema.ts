@@ -15,6 +15,13 @@ export function openDatabase(): Database.Database {
 
 function migrate(db: Database.Database): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS sources (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -94,6 +101,7 @@ function migrate(db: Database.Database): void {
   `);
   ensureColumn(db, 'sources', 'external_id', 'TEXT');
   ensureWebPageSourceType(db);
+  ensureUserIdColumn(db);
 }
 
 function ensureColumn(db: Database.Database, table: string, column: string, definition: string): void {
@@ -133,6 +141,68 @@ function ensureWebPageSourceType(db: Database.Database): void {
       )
       SELECT
         id, name, url, type, external_id, topics, enabled, fetch_interval_minutes,
+        daily_request_limit, last_fetch_at, last_status, created_at
+      FROM sources;
+
+      DROP TABLE sources;
+      ALTER TABLE sources_new RENAME TO sources;
+    `);
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+}
+
+function ensureUserIdColumn(db: Database.Database): void {
+  // Check if sources already has user_id
+  const rows = db.prepare(`PRAGMA table_info(sources)`).all() as Array<{ name: string }>;
+  if (rows.some((row) => row.name === 'user_id')) return;
+
+  // Add user_id column (nullable initially for migration)
+  db.exec(`ALTER TABLE sources ADD COLUMN user_id INTEGER REFERENCES users(id)`);
+
+  // Create default user if no users exist
+  const userCount = db.prepare(`SELECT COUNT(*) as count FROM users`).get() as { count: number };
+  if (userCount.count === 0) {
+    db.exec(`
+      INSERT INTO users (email, password_hash)
+      VALUES ('default@localhost', '')
+    `);
+  }
+
+  // Get the first user id (should be 1 after above insert)
+  const defaultUser = db.prepare(`SELECT id FROM users ORDER BY id LIMIT 1`).get() as { id: number } | undefined;
+
+  if (defaultUser) {
+    // Assign all existing sources to the default user
+    db.prepare(`UPDATE sources SET user_id = ? WHERE user_id IS NULL`).run(defaultUser.id);
+  }
+
+  // Now make user_id NOT NULL by recreating the table
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.exec(`
+      CREATE TABLE sources_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        url TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('rss', 'rsshub', 'x_user', 'x_search', 'web_page')),
+        external_id TEXT,
+        topics TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        fetch_interval_minutes INTEGER NOT NULL DEFAULT 30,
+        daily_request_limit INTEGER NOT NULL DEFAULT 100,
+        last_fetch_at TEXT,
+        last_status TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO sources_new (
+        id, user_id, name, url, type, external_id, topics, enabled, fetch_interval_minutes,
+        daily_request_limit, last_fetch_at, last_status, created_at
+      )
+      SELECT
+        id, user_id, name, url, type, external_id, topics, enabled, fetch_interval_minutes,
         daily_request_limit, last_fetch_at, last_status, created_at
       FROM sources;
 

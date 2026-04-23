@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { config } from './config.js';
+import { generateClashConfig } from './clash.js';
 import type { Repository } from './db/repository.js';
 import { fetchSource } from './fetchers/index.js';
 
@@ -21,5 +22,27 @@ export function startScheduler(repo: Repository): void {
       repo.finishFetchRun(runId, result.status, result.items.length, newCount, result.requestCount, result.error);
       repo.updateSourceFetchStatus(source.id, result.status);
     }
+  });
+
+  startClashScheduler();
+}
+
+function startClashScheduler(): void {
+  const interval = Math.max(5, config.clashRefreshIntervalMinutes);
+  const refresh = async () => {
+    if (!config.clashSourceUrl) return;
+    try {
+      await generateClashConfig(`http://${config.webHost}:${config.webPort}`);
+    } catch (err) {
+      console.error('Clash config refresh failed:', err instanceof Error ? err.message : err);
+    }
+  };
+
+  setTimeout(() => {
+    void refresh();
+  }, 5_000);
+
+  cron.schedule(`*/${interval} * * * *`, () => {
+    void refresh();
   });
 }

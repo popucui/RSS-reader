@@ -26,3 +26,7 @@ export const sourceUpdateSchema = z.object({
 export const itemStateSchema = z.object({
   value: z.boolean()
 });
+
+export const clashRulesSchema = z.object({
+  rules: z.string().max(50_000)
+});

@@ -4,7 +4,7 @@ This file gives Claude Code project context for `/home/cuijie/workspace/web_dev/
 
 ## Summary
 
-`RSS-reader` is a working local-first reader for curated RSS/RSSHub/X/web-page sources. It currently uses TypeScript + Node.js for the backend, SQLite for local storage, and React + Vite for the frontend.
+`RSS-reader` is a working local-first reader for curated RSS/RSSHub/X/web-page sources. It currently uses TypeScript + Node.js for the backend, SQLite for local storage, JWT-based local user authentication, and React + Vite for the frontend.
 
 The app already runs locally and contains real user data in `data/rss-reader.sqlite3`. Preserve that data.
 
@@ -58,6 +58,8 @@ git push
 
 - TypeScript + Node.js.
 - Fastify.
+- JWT auth via `@fastify/jwt`.
+- Password hashing via `bcrypt`.
 - SQLite via `better-sqlite3`.
 - RSS parsing via `rss-parser`.
 - Lightweight official web-page link discovery for sites without RSS.
@@ -78,6 +80,7 @@ git push
 - `src/fetchers/x.ts`: X API ingestion.
 - `src/fetchers/index.ts`: source dispatcher.
 - `src/routes/api.ts`: REST endpoints and refresh logic.
+- `src/routes/auth.ts`: registration, login, current user, and password change endpoints.
 - `src/routes/schemas.ts`: Zod schemas.
 - `src/scheduler.ts`: background polling.
 - `src/tools/refresh-source.ts`: CLI refresh helper.
@@ -88,6 +91,8 @@ git push
 ## Current Features
 
 - Source management for `rss`, `rsshub`, `web_page`, `x_user`, and `x_search`.
+- User registration, login, logout, current-session restore, and password change.
+- Authenticated source/item/fetch-log access scoped to the current user's sources.
 - Manual source refresh and refresh-all.
 - RSS/RSSHub ingestion and dedupe.
 - Web-page ingestion for official news/research index pages.
@@ -99,6 +104,21 @@ git push
 - Clicking an item title opens the source link and marks the item read.
 - Fetch log tab with request counts and errors.
 - Independent scrolling for source management and main content.
+
+## User/Auth Behavior
+
+Authentication is local-first and JWT-based:
+
+- Frontend stores the bearer token in `localStorage` under `rss_reader_token`.
+- Public endpoints: `/api/health`, `/api/auth/register`, `/api/auth/login`.
+- `/api/auth/me` verifies the token and restores the signed-in user.
+- `/api/auth/password` verifies the token, checks the current password with bcrypt, and updates the stored bcrypt hash.
+- `src/server.ts` protects most `/api/*` routes through a global `onRequest` hook.
+- Sources and fetch logs are filtered by `sources.user_id`.
+- Item listing and read/star mutations must remain constrained to items from the authenticated user's sources.
+- Legacy sources may initially belong to a placeholder `default@localhost` user. `Repository.adoptLegacySourcesForUser()` moves those sources to the first real authenticated user with no sources; keep this compatibility path unless doing an explicit migration.
+
+The current local user is generally `popucui@gmail.com`, but code should never hard-code that email.
 
 ## Current Local Sources
 
@@ -149,18 +169,21 @@ SQLite database path defaults to:
 
 Tables:
 
+- `users`
 - `sources`
 - `items`
 - `item_topics`
 - `fetch_runs`
 - `items_fts`
 
-Keep migrations idempotent in `src/db/schema.ts`. Do not delete or recreate the database to solve schema problems unless explicitly asked.
+`sources.user_id` links sources to local users. Keep migrations idempotent in `src/db/schema.ts`. Do not delete or recreate the database to solve schema problems unless explicitly asked.
 
 ## UI Rules
 
 - Keep this as a reader/workbench, not a marketing page.
 - Main view should prioritize reading density and source triage.
+- Keep signed-in user controls separate from reader metrics so long emails do not collide with sources/items counts.
+- Keep password change reachable from the signed-in user area.
 - Preserve source panel and content panel independent scrolling.
 - Keep fetch log behind the tab.
 - Preserve visible unread/read distinction.
@@ -181,6 +204,15 @@ For quick API checks:
 ```bash
 curl -s http://127.0.0.1:4300/api/health
 curl -s http://127.0.0.1:4300/api/sources
+```
+
+Most API routes require a bearer token. For authenticated API checks:
+
+```bash
+curl -s -X POST http://127.0.0.1:4300/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"popucui@gmail.com","password":"<password>"}'
+curl -s http://127.0.0.1:4300/api/sources -H "Authorization: Bearer <token>"
 ```
 
 Use `npm run refresh:source -- <id>` carefully on X sources because successful non-skipped runs can spend X API credits.

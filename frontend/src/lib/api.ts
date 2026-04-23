@@ -10,19 +10,90 @@ export interface SourceInput {
   dailyRequestLimit: number;
 }
 
+export interface AuthResponse {
+  token: string;
+  user: { id: number; email: string };
+}
+
+export interface ClashState {
+  rules: string;
+  sourceConfigured: boolean;
+  refreshIntervalMinutes: number;
+  configExists: boolean;
+  configUpdatedAt: string | null;
+  lastRefreshAttemptAt: string | null;
+  lastRefreshSuccessAt: string | null;
+  lastRefreshErrorAt: string | null;
+  lastRefreshError: string | null;
+  configUrl: string;
+  importUrl: string;
+}
+
+export interface ClashGenerateResult {
+  ok: true;
+  ruleCount: number;
+  configUrl: string;
+  importUrl: string;
+  updatedAt: string;
+}
+
+const TOKEN_KEY = 'rss_reader_token';
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
+  const headers = new Headers(init?.headers);
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  if (init?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   const response = await fetch(path, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {})
-    },
-    ...init
+    ...init,
+    headers
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error || `Request failed: ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+export function register(email: string, password: string): Promise<AuthResponse> {
+  return request<AuthResponse>('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+}
+
+export function login(email: string, password: string): Promise<AuthResponse> {
+  return request<AuthResponse>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+}
+
+export function getCurrentUser(): Promise<{ id: number; email: string }> {
+  return request<{ id: number; email: string }>('/api/auth/me');
+}
+
+export function changePassword(currentPassword: string, newPassword: string): Promise<{ ok: true }> {
+  return request<{ ok: true }>('/api/auth/password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword })
+  });
 }
 
 export function listSources(): Promise<Source[]> {
@@ -74,4 +145,19 @@ export function setStarred(id: number, value: boolean) {
 
 export function listFetchRuns(): Promise<FetchRun[]> {
   return request<FetchRun[]>('/api/fetch-runs');
+}
+
+export function getClashState(): Promise<ClashState> {
+  return request<ClashState>('/api/clash');
+}
+
+export function saveClashRules(rules: string): Promise<ClashState> {
+  return request<ClashState>('/api/clash/rules', {
+    method: 'PUT',
+    body: JSON.stringify({ rules })
+  });
+}
+
+export function generateClashConfig(): Promise<ClashGenerateResult> {
+  return request<ClashGenerateResult>('/api/clash/generate', { method: 'POST' });
 }

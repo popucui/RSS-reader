@@ -10,6 +10,7 @@ export type Topic =
 
 export interface Source {
   id: number;
+  userId: number;
   name: string;
   url: string;
   type: SourceType;
