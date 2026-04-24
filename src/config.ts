@@ -22,6 +22,7 @@ export const config = {
   maxItemsPerFetch: intFromEnv('MAX_ITEMS_PER_FETCH', 30),
   xBearerToken: process.env.X_BEARER_TOKEN ?? '',
   clashSourceUrl: process.env.CLASH_SOURCE_URL ?? '',
+  clashSecondarySourceUrl: process.env.CLASH_SECONDARY_SOURCE_URL ?? 'https://www.feed-dl.com/feeds/nzkPzEuQK7/clash.yml',
   clashRefreshIntervalMinutes: intFromEnv('CLASH_REFRESH_INTERVAL_MINUTES', 60)
 };
 
