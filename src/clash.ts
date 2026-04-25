@@ -222,28 +222,46 @@ export function mergeClashConfigs(configTexts: string[], customRules: string[]):
     throw new Error('At least one Clash source config is required');
   }
 
-  const [baseConfig, ...extraConfigs] = configTexts;
+  const [primaryConfig, secondaryConfig, ...extraConfigs] = configTexts;
+  const hasSecondaryConfig = Boolean(secondaryConfig);
+  const baseConfig = hasSecondaryConfig ? secondaryConfig : primaryConfig;
+  const proxyConfigs = hasSecondaryConfig
+    ? [secondaryConfig, primaryConfig, ...extraConfigs]
+    : [primaryConfig, ...extraConfigs];
+  const policyConfigs = hasSecondaryConfig
+    ? [secondaryConfig, ...extraConfigs]
+    : [primaryConfig, ...extraConfigs];
+  const primaryLines = primaryConfig.split(/\r?\n/);
   const baseLines = removeExistingBlock(baseConfig.split(/\r?\n/));
 
   const mergedProxies = filterInfoProxies(dedupeNamedBlocks([
-    ...collectSectionBlocks(baseLines, 'proxies'),
-    ...extraConfigs.flatMap((configText) => collectSectionBlocks(configText.split(/\r?\n/), 'proxies'))
+    ...proxyConfigs.flatMap((configText) => collectSectionBlocks(configText.split(/\r?\n/), 'proxies'))
   ]));
   replaceSection(baseLines, 'proxies', mergedProxies);
 
   const infoNames = new Set(mergedProxies.infoNames);
-  const mergedProxyGroups = mergeProxyGroupRefs(removeInfoProxyRefs(dedupeNamedBlocks([
-    ...collectSectionBlocks(baseLines, 'proxy-groups'),
-    ...extraConfigs.flatMap((configText) => collectSectionBlocks(configText.split(/\r?\n/), 'proxy-groups'))
-  ]), infoNames), secondaryProxyGroupName, primaryProxyGroupName);
+  const primaryProxyNames = collectSectionBlocks(primaryLines, 'proxies').reduce<string[]>((names, block) => {
+    const name = extractName(block);
+    if (name && !infoNames.has(name)) {
+      names.push(name);
+    }
+    return names;
+  }, []);
+  const proxyGroups = removeInfoProxyRefs(dedupeNamedBlocks([
+    ...policyConfigs.flatMap((configText) => collectSectionBlocks(configText.split(/\r?\n/), 'proxy-groups'))
+  ]), infoNames);
+  const mergedProxyGroups = hasSecondaryConfig
+    ? mergePrimaryProxyNamesIntoSecondaryGroup(proxyGroups, primaryProxyNames)
+    : mergeProxyGroupRefs(proxyGroups, secondaryProxyGroupName, primaryProxyGroupName);
   replaceSection(baseLines, 'proxy-groups', mergedProxyGroups);
 
   const sourceRules = dedupeRules([
-    ...collectRuleLines(baseLines),
-    ...extraConfigs.flatMap((configText) => collectRuleLines(configText.split(/\r?\n/)))
+    ...policyConfigs.flatMap((configText) => collectRuleLines(configText.split(/\r?\n/)))
   ]);
+  const ruleSourceName = hasSecondaryConfig ? primaryProxyGroupName : secondaryProxyGroupName;
+  const ruleTargetName = hasSecondaryConfig ? secondaryProxyGroupName : primaryProxyGroupName;
   const mergedRules = dedupeRules([...customRules, ...sourceRules]).map((rule) =>
-    replaceRuleTarget(rule, secondaryProxyGroupName, primaryProxyGroupName)
+    replaceRuleTarget(rule, ruleSourceName, ruleTargetName)
   );
   return injectRules(replaceRulesSection(baseLines), mergedRules);
 }
@@ -373,6 +391,18 @@ function mergeProxyGroupRefs(blocks: string[][], sourceName: string, targetName:
     .map((block) => rewriteProxyGroupRefs(block, sourceName, targetName));
 
   return merged;
+}
+
+function mergePrimaryProxyNamesIntoSecondaryGroup(blocks: string[][], primaryProxyNames: string[]): string[][] {
+  const target = blocks.find((block) => extractName(block) === secondaryProxyGroupName);
+  if (target && primaryProxyNames.length > 0) {
+    appendProxyRefs(target, primaryProxyNames);
+    prioritizeProxyRefs(target, (name) => /美西|美国/.test(name));
+  }
+
+  return blocks
+    .filter((block) => extractName(block) !== primaryProxyGroupName)
+    .map((block) => rewriteProxyGroupRefs(block, primaryProxyGroupName, secondaryProxyGroupName));
 }
 
 function collectProxyRefs(block: string[]): string[] {

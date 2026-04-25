@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mergeClashConfigs } from './clash.js';
 
 describe('mergeClashConfigs', () => {
-  it('merges proxies, proxy groups, and dedupes rules against custom rules', () => {
+  it('uses secondary policy while appending primary proxies and deduping against custom rules', () => {
     const primary = `
 port: 7890
 proxies:
@@ -40,16 +40,19 @@ rules:
 
     expect(output).toContain('name: Extra Group');
     expect(output).toContain('name: Extra Node');
+    expect(output).toContain('name: Base Node');
+    expect(output).not.toContain('name: Main Group');
     expect(output).toContain(' DOMAIN-SUFFIX,grok.com,DIRECT');
-    expect(output).toContain(' DOMAIN-SUFFIX,example.com,DIRECT');
+    expect(output).toContain(' DOMAIN-SUFFIX,example.com,⚡️ 代理');
     expect(output).toContain(' IP-CIDR,1.2.3.4/32,DIRECT,no-resolve');
     expect(output).not.toContain(' DOMAIN-SUFFIX,grok.com,⚡️ 代理');
+    expect(output).not.toContain(' MATCH,Main Group');
 
     const exampleMatches = output.match(/DOMAIN-SUFFIX,example\.com/g) ?? [];
     expect(exampleMatches).toHaveLength(1);
   });
 
-  it('reindents secondary block-style proxies to match primary indent', () => {
+  it('keeps secondary indentation and reindents appended primary proxies', () => {
     const primary = `
 port: 7890
 proxies:
@@ -84,11 +87,9 @@ rules:
 `;
 
     const output = mergeClashConfigs([primary, secondary], []);
-    // The multi-line proxy block must be re-indented to 2 spaces
-    expect(output).toContain('  - name: Extra Node\n    type: trojan');
-    expect(output).not.toContain('\n- name: Extra Node');
-    // proxy-groups must also be re-indented
-    expect(output).toContain('  - name: Extra Group\n    type: select');
+    expect(output).toContain('- name: Extra Node\n  type: trojan');
+    expect(output).toContain('- {name: Base Node');
+    expect(output).toContain('- name: Extra Group\n  type: select');
   });
 
   it('filters info-only proxy nodes and removes their refs from proxy-groups', () => {
@@ -149,12 +150,12 @@ rules:
     // Real secondary proxy should remain
     expect(output).toContain('Real Secondary');
     // Info node refs should be removed from proxy-groups
-    expect(output).toContain('  - name: Secondary Group');
+    expect(output).toContain('- name: Secondary Group');
     // The group should still contain real proxies
     expect(output).toContain('Real Secondary');
   });
 
-  it('moves secondary proxy group nodes into primary selection group', () => {
+  it('adds primary proxy nodes into the secondary selection group', () => {
     const primary = `
 port: 7890
 proxies:
@@ -192,19 +193,21 @@ rules:
 - IP-CIDR,1.2.3.4/32,⚡️ 代理,no-resolve
 `;
 
-    const output = mergeClashConfigs([primary, secondary], []);
+    const output = mergeClashConfigs([primary, secondary], [
+      ' - DOMAIN-SUFFIX,custom.example,🔰 选择节点'
+    ]);
 
-    expect(output).toContain('  - name: 🔰 选择节点');
-    expect(output).toContain('      - Secondary One');
-    expect(output).toContain('      - Secondary Two');
-    expect(output).not.toContain('name: "⚡️ 代理"');
-    expect(output).not.toContain('DOMAIN-SUFFIX,grok.com,⚡️ 代理');
-    expect(output).toContain('DOMAIN-SUFFIX,grok.com,🔰 选择节点');
-    expect(output).not.toContain('IP-CIDR,1.2.3.4/32,⚡️ 代理,no-resolve');
-    expect(output).toContain('IP-CIDR,1.2.3.4/32,🔰 选择节点,no-resolve');
+    expect(output).toContain('- name: "⚡️ 代理"');
+    expect(output).toContain('  - Secondary One');
+    expect(output).toContain('  - Secondary Two');
+    expect(output).toContain('  - Base Node');
+    expect(output).not.toContain('name: 🔰 选择节点');
+    expect(output).toContain('DOMAIN-SUFFIX,custom.example,⚡️ 代理');
+    expect(output).toContain('DOMAIN-SUFFIX,grok.com,⚡️ 代理');
+    expect(output).toContain('IP-CIDR,1.2.3.4/32,⚡️ 代理,no-resolve');
   });
 
-  it('prioritizes US West and US nodes in the primary selection group', () => {
+  it('prioritizes US West and US nodes in the secondary selection group', () => {
     const primary = `
 port: 7890
 proxies:
@@ -244,11 +247,11 @@ rules:
 `;
 
     const output = mergeClashConfigs([primary, secondary], []);
-    const groupStart = output.indexOf('  - name: 🔰 选择节点');
-    const usIndex = output.indexOf('      - 美国 Node', groupStart);
-    const usWestIndex = output.indexOf('      - x1.0 美西 - 中转1', groupStart);
-    const hkIndex = output.indexOf('      - 香港 Node', groupStart);
-    const jpIndex = output.indexOf('      - x1.0 日本 - 中转1', groupStart);
+    const groupStart = output.indexOf('- name: "⚡️ 代理"');
+    const usIndex = output.indexOf('  - 美国 Node', groupStart);
+    const usWestIndex = output.indexOf('  - x1.0 美西 - 中转1', groupStart);
+    const hkIndex = output.indexOf('  - 香港 Node', groupStart);
+    const jpIndex = output.indexOf('  - x1.0 日本 - 中转1', groupStart);
 
     expect(usIndex).toBeGreaterThan(groupStart);
     expect(usWestIndex).toBeGreaterThan(groupStart);
